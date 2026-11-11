@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>قیمت لحظه‌ای طلا، سکه و دلار</title>
+<link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #14110d; --panel: #1e1913; --line: #3a3024;
+    --text: #f3ead9; --muted: #a39580; --gold: #e0b252;
+    --up: #6fcf8e; --down: #f0716b;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font-family: "Vazirmatn", Tahoma, sans-serif; line-height: 1.7; }
+  main { max-width: 760px; margin: 0 auto; padding: 24px 16px 48px; }
+  header { display: flex; justify-content: space-between; align-items: flex-end;
+    gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
+  h1 { margin: 0; font-size: 1.6rem; font-weight: 800; color: var(--gold); }
+  #status { color: var(--muted); font-size: .85rem; }
+  button { font: inherit; background: var(--gold); color: #2a2010; border: 0;
+    border-radius: 8px; padding: 6px 14px; font-weight: 600; cursor: pointer; }
+  button:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+  #notice { display: none; background: #3a2c14; border: 1px solid var(--gold);
+    border-radius: 8px; padding: 10px 14px; margin-bottom: 16px; font-size: .9rem; }
+  .group { background: var(--panel); border: 1px solid var(--line);
+    border-radius: 12px; margin-bottom: 16px; overflow: hidden; }
+  .group h2 { margin: 0; padding: 10px 16px; font-size: 1rem; color: var(--muted);
+    border-bottom: 1px solid var(--line); font-weight: 600; }
+  .row { display: flex; justify-content: space-between; align-items: center;
+    padding: 12px 16px; border-bottom: 1px solid var(--line); gap: 12px; }
+  .row:last-child { border-bottom: 0; }
+  .name { font-weight: 600; }
+  .price { font-weight: 800; font-size: 1.1rem; }
+  .unit { color: var(--muted); font-size: .75rem; margin-right: 4px; font-weight: 400; }
+  .chg { font-size: .85rem; min-width: 64px; text-align: left; direction: ltr; }
+  .up { color: var(--up); } .down { color: var(--down); }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div>
+      <h1>قیمت طلا، سکه و دلار</h1>
+      <div id="status">در حال بارگذاری…</div>
+    </div>
+    <button id="refresh" type="button">به‌روزرسانی</button>
+  </header>
+
+  <div id="notice"></div>
+  <div id="content"></div>
+</main>
+
+<script>
+/* ============ تنظیمات ============ */
+// ۱) از یک سرویس قیمت (مثلاً brsapi.ir) کلید API بگیرید و اینجا بگذارید.
+// ۲) آدرس سرویس را طبق مستندات خود سرویس وارد کنید.
+const API_URL = "";            // مثال: "https://brsapi.ir/Api/Market/Gold_Currency.php?key=YOUR_KEY"
+const REFRESH_SECONDS = 60;    // هر چند ثانیه یک بار قیمت‌ها تازه شود
+const SOURCE_IS_RIAL = false;  // اگر سرویس قیمت را به ریال می‌دهد، true کنید تا به تومان تبدیل شود
+
+// اگر API_URL خالی باشد، داده‌ی نمونه (غیرواقعی) نمایش داده می‌شود.
+// اعداد نمونه تقریبی و از گزارش خبری ۲۷ مهر ۱۴۰۵ است، نه قیمت امروز.
+const DEMO = [
+  { group: "gold", name: "طلای ۱۸ عیار (هر گرم)", price: 26162400, change: 1.04 },
+  { group: "gold", name: "طلای ۲۴ عیار (هر گرم)", price: 34879000, change: 1.04 },
+  { group: "gold", name: "مثقال طلا", price: 113330000, change: 1.04 },
+  { group: "coin", name: "سکه امامی", price: 266800000, change: 1.16 },
+  { group: "coin", name: "سکه طرح قدیم", price: 257100000, change: 0.55 },
+  { group: "coin", name: "نیم‌سکه", price: 140500000, change: 0.93 },
+  { group: "coin", name: "ربع‌سکه", price: 74500000, change: 1.05 },
+  { group: "coin", name: "سکه گرمی", price: 38000000, change: 1.93 },
+  { group: "currency", name: "دلار", price: 264000, change: -1.5 }
+];
+
+/* ============ تبدیل پاسخ سرویس به فرمت ساده ============ */
+// فرض: پاسخ شامل آرایه‌هایی مثل gold / currency است و هر آیتم فیلدهای
+// name، price و change_percent دارد. اگر سرویس شما ساختار دیگری دارد،
+// فقط همین تابع را تغییر دهید.
+function normalize(data) {
+  const items = [];
+  Object.values(data).forEach(list => {
+    if (!Array.isArray(list)) return;
+    list.forEach(it => {
+      const name = it.name || it.title || "";
+      let price = Number(String(it.price ?? "").replace(/,/g, ""));
+      if (!name || !price) return;
+      if (SOURCE_IS_RIAL) price = Math.round(price / 10);
+      let group = "currency";
+      if (name.includes("سکه")) group = "coin";
+      else if (name.includes("طلا") || name.includes("مثقال") || name.includes("گرم")) group = "gold";
+      items.push({ group, name, price, change: Number(it.change_percent ?? it.change ?? 0) });
+    });
+  });
+  return items;
+}
+
+/* ============ نمایش ============ */
+const GROUPS = { gold: "طلا", coin: "سکه", currency: "ارز" };
+const fa = new Intl.NumberFormat("fa-IR");
+
+function render(items, isDemo) {
+  const box = document.getElementById("content");
+  box.innerHTML = "";
+  Object.entries(GROUPS).forEach(([key, label]) => {
+    const rows = items.filter(i => i.group === key);
+    if (!rows.length) return;
+    const sec = document.createElement("section");
+    sec.className = "group";
+    sec.innerHTML = `<h2>${label}</h2>` + rows.map(r => {
+      const cls = r.change > 0 ? "up" : r.change < 0 ? "down" : "";
+      const sign = r.change > 0 ? "+" : "";
+      return `<div class="row">
+        <span class="name">${r.name}</span>
+        <span class="price">${fa.format(r.price)}<span class="unit">تومان</span></span>
+        <span class="chg ${cls}">${sign}${r.change.toFixed(2)}٪</span>
+      </div>`;
+    }).join("");
+    box.appendChild(sec);
+  });
+  const notice = document.getElementById("notice");
+  if (isDemo) {
+    notice.style.display = "block";
+    notice.textContent = "این قیمت‌ها نمونه و غیرواقعی‌اند. برای قیمت زنده، آدرس API را در بخش تنظیمات بالای کد وارد کنید.";
+  } else {
+    notice.style.display = "none";
+  }
+  document.getElementById("status").textContent =
+    "آخرین به‌روزرسانی: " + new Date().toLocaleTimeString("fa-IR");
+}
+
+async function load() {
+  const status = document.getElementById("status");
+  if (!API_URL) { render(DEMO, true); return; }
+  try {
+    const res = await fetch(API_URL);
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const items = normalize(await res.json());
+    if (!items.length) throw new Error("داده‌ای پیدا نشد");
+    render(items, false);
+  } catch (e) {
+    status.textContent = "دریافت قیمت ناموفق بود: " + e.message + " — دوباره تلاش می‌کنیم.";
+  }
+}
+
+document.getElementById("refresh").addEventListener("click", load);
+load();
+setInterval(load, REFRESH_SECONDS * 1000);
+</script>
+</body>
+</html>
